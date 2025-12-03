@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Game Observer</title>
+    <link rel="stylesheet" href="css/observer.css">
+</head>
+<body>
+    <!-- File Upload Screen -->
+    <div class="upload-container" id="uploadContainer">
+        <div class="upload-panel">
+            <h1>🚀 Space Game Observer</h1>
+            <p>Upload a compressed observer file (.gz) to load game data for visualization.</p>
+
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Drop observer.gz file here</div>
+                <div class="upload-subtext">or click to browse</div>
+            </div>
+
+            <input type="file" id="fileInput" class="file-input" accept=".gz">
+
+            <div id="loadingText" class="loading-text" style="display: none;">Loading game data...</div>
+            <div id="errorText" class="error-text" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Main Observer Interface -->
+    <div class="container" id="mainContainer">
+        <div class="header">
+            <h1>🚀 Space Game Observer</h1>
+            <div class="controls">
+                <button class="btn" id="resetView">Reset View</button>
+                <button class="btn" id="toggleGrid">Toggle Grid</button>
+                <button class="btn" id="loadNewFile">Load New File</button>
+            </div>
+        </div>
+
+        <div class="game-canvas">
+            <canvas id="canvas"></canvas>
+            <div class="zoom-controls">
+                <button class="zoom-btn" id="zoomIn">+</button>
+                <button class="zoom-btn" id="zoomOut">−</button>
+            </div>
+            <div class="coordinates" id="coordinates">X: 0, Y: 0</div>
+        </div>
+
+        <div class="info-panel">
+            <div id="playersContainer" class="players-container"></div>
+        </div>
+
+        <div class="entity-details">
+            <div class="entity-info" id="entityInfo">
+                <strong>Click on an entity to see details</strong>
+            </div>
+        </div>
+
+        <div class="timeline-controls">
+            <div class="playback-controls">
+                <button class="play-btn" id="playPauseBtn">
+                    <span id="playIcon">▶</span>
+                    <span id="playText">Play</span>
+                </button>
+            </div>
+
+            <div class="timeline-container">
+                <input type="range" class="frame-slider" id="frameSlider" min="0" max="1" value="0" step="1">
+                <div class="frame-info">
+                    <span>Frame:</span>
+                    <span class="frame-counter" id="frameCounter">0 / 0</span>
+                </div>
+            </div>
+
+            <div class="speed-control">
+                <span>Speed:</span>
+                <select class="speed-select" id="speedSelect">
+                    <option value="500">500ms</option>
+                    <option value="250">250ms</option>
+                    <option value="100">100ms</option>
+                    <option value="50" selected>50ms</option>
+                    <option value="20">20ms</option>
+                    <option value="10">10ms</option>
+                </select>
+
+              </div>
+        </div>
+    </div>
+
+    <script src="js/Camera.js"></script>
+    <script src="js/GameDataManager.js"></script>
+    <script src="js/Renderer.js"></script>
+    <script src="js/InputHandler.js"></script>
+    <script src="js/SpaceGameObserver.js"></script>
+    <script src="js/TimelineManager.js"></script>
+    <script src="js/main.js"></script>
+
+    <script>
+        class FileUploadHandler {
+            constructor() {
+                this.uploadContainer = document.getElementById('uploadContainer');
+                this.mainContainer = document.getElementById('mainContainer');
+                this.uploadArea = document.getElementById('uploadArea');
+                this.fileInput = document.getElementById('fileInput');
+                this.loadingText = document.getElementById('loadingText');
+                this.errorText = document.getElementById('errorText');
+                this.redirectUrl = null;
+
+                this.initEventListeners();
+                this.checkUrlParameter();
+            }
+
+            initEventListeners() {
+                // File upload area click
+                this.uploadArea.addEventListener('click', () => {
+                    this.fileInput.click();
+                });
+
+                // File input change
+                this.fileInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        this.handleFileUpload(file);
+                    }
+                });
+
+                // Drag and drop
+                this.uploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.uploadArea.classList.add('dragover');
+                });
+
+                this.uploadArea.addEventListener('dragleave', () => {
+                    this.uploadArea.classList.remove('dragover');
+                });
+
+                this.uploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.uploadArea.classList.remove('dragover');
+
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        this.handleFileUpload(files[0]);
+                    }
+                });
+
+            }
+
+            checkUrlParameter() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const filePath = urlParams.get('file');
+                const autoplay = urlParams.get('autoplay');
+                const backUrl = urlParams.get('back');
+
+                if (backUrl) {
+                    this.redirectUrl = backUrl;
+                }
+
+                if (filePath) {
+                    this.handleUrlLoad(filePath, autoplay === '1'); // Pass autoplay flag
+                }
+            }
+
+            async handleFileUpload(file) {
+                if (!file.name.endsWith('.gz')) {
+                    this.showError('Please upload a .gz file');
+                    return;
+                }
+
+                this.showLoading(true);
+                this.hideError();
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    await this.processGameData(arrayBuffer);
+                } catch (error) {
+                    console.error('Error processing file:', error);
+                    this.showError('Failed to process file: ' + error.message);
+                    this.showLoading(false);
+                }
+            }
+
+            async handleUrlLoad(url, autoplay = false) {
+                // Store autoplay flag for later use
+                this.autoplayEnabled = autoplay;
+
+                this.showLoading(true);
+                this.hideError();
+
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const arrayBuffer = await response.arrayBuffer();
+                    await this.processGameData(arrayBuffer);
+                } catch (error) {
+                    console.error('Error loading from URL:', error);
+                    this.showError('Failed to load from URL: ' + error.message);
+                    this.showLoading(false);
+                }
+            }
+
+            async processGameData(arrayBuffer) {
+                try {
+                    // Decompress and parse the data
+                    const decompressedData = await this.decompressGzip(arrayBuffer);
+                    const gameStates = this.parseMultipleJsonObjects(decompressedData);
+
+                    if (gameStates.length === 0) {
+                        throw new Error('No valid game data found in file');
+                    }
+
+                    // Initialize the observer with the loaded data
+                    this.initializeObserver(gameStates);
+
+                } catch (error) {
+                    throw error;
+                }
+            }
+
+            async decompressGzip(arrayBuffer) {
+                // Use DecompressionStream API if available (modern browsers)
+                if ('DecompressionStream' in window) {
+                    const decompressionStream = new DecompressionStream('gzip');
+                    const stream = new Response(arrayBuffer).body
+                        .pipeThrough(decompressionStream);
+                    const decompressedArrayBuffer = await new Response(stream).arrayBuffer();
+
+                    // Convert to string
+                    const decoder = new TextDecoder();
+                    return decoder.decode(decompressedArrayBuffer);
+                } else {
+                    // Fallback: Simple gzip decompression (would need a library like pako)
+                    // For now, let's include a basic implementation or throw an error
+                    throw new Error('Gzip decompression not supported in this browser. Please use a modern browser or include a decompression library.');
+                }
+            }
+
+            parseMultipleJsonObjects(dataString) {
+                const gameStates = [];
+                const lines = dataString.trim().split('\n');
+
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine) {
+                        try {
+                            const gameState = JSON.parse(trimmedLine);
+                            gameStates.push(gameState);
+                        } catch (error) {
+                            console.warn('Failed to parse line:', trimmedLine, error);
+                        }
+                    }
+                }
+
+                return gameStates;
+            }
+
+            initializeObserver(gameStates) {
+                // Update the existing observer with new data
+                if (window.gameObserver && window.gameObserver.dataManager) {
+                    window.gameObserver.dataManager.loadUploadedData(gameStates);
+
+                    // Update timeline manager with redirect URL if available
+                    if (this.redirectUrl && window.gameObserver.timelineManager) {
+                        window.gameObserver.timelineManager.redirectUrl = this.redirectUrl;
+                        window.gameObserver.timelineManager.redirectTriggered = false;
+                    }
+                } else {
+                    // Create new observer with redirect URL if no observer exists
+                    window.gameObserver = new SpaceGameObserver(this.redirectUrl);
+                    window.gameObserver.dataManager.loadUploadedData(gameStates);
+                }
+
+                // Show the main interface
+                this.showMainInterface();
+
+                // Trigger autoplay if enabled (no edge case handling for single frame as requested)
+                if (this.autoplayEnabled) {
+                    this.triggerAutoplay();
+                }
+            }
+
+            showMainInterface() {
+                this.uploadContainer.classList.add('hidden');
+                this.mainContainer.classList.add('visible');
+
+                // Add event listener for the "Load New File" button
+                const loadNewFileBtn = document.getElementById('loadNewFile');
+                if (loadNewFileBtn) {
+                    loadNewFileBtn.addEventListener('click', () => this.loadNewFile());
+                }
+            }
+
+            triggerAutoplay() {
+                // Small delay to ensure UI is fully rendered
+                setTimeout(() => {
+                    if (window.gameObserver && window.gameObserver.timelineManager) {
+                        const timelineManager = window.gameObserver.timelineManager;
+
+                        // Only autoplay if we have multiple frames
+                        if (timelineManager.getTotalFrames() > 1) {
+                            timelineManager.autoplay();
+                        }
+                    }
+                }, 100); // 100ms delay for UI stability
+            }
+
+            loadNewFile() {
+                // Hide main interface and show upload screen
+                this.mainContainer.classList.remove('visible');
+                this.uploadContainer.classList.remove('hidden');
+
+                // Clear any existing inputs
+                this.fileInput.value = '';
+                this.hideError();
+                this.showLoading(false);
+            }
+
+            showLoading(show) {
+                this.loadingText.style.display = show ? 'block' : 'none';
+            }
+
+            showError(message) {
+                this.errorText.textContent = message;
+                this.errorText.style.display = 'block';
+            }
+
+            hideError() {
+                this.errorText.style.display = 'none';
+            }
+        }
+
+        // Initialize the file upload handler when the page loads
+        window.addEventListener('load', () => {
+            new FileUploadHandler();
+        });
+    </script>
+</body>
+</html>
