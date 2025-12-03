@@ -3,8 +3,10 @@ from typing import List
 from proboj import *
 import math
 from enum import Enum
+import random
 
-
+EARLY_GAME_ROUND = 500
+END_GAME_MINERS_BUY_PROB = 0.45
 
 class MyClient(Client):
     my_ships : List['MyShip']= []
@@ -34,12 +36,18 @@ class MyClient(Client):
 
         turns: List[Turn] = []
 
-        if self.game_map.round == 300 and False:
-            turns.append(BuyTurn(ShipType.BATTLE_SHIP))
-
-        if self.get_my_mothership().fuel >= 400 and self.get_my_mothership().rock >= 500:
-            turns.append(BuyTurn(ShipType.SUCKER_SHIP))
-            turns.append(BuyTurn(ShipType.DRILL_SHIP))
+        if self.game_map.round < EARLY_GAME_ROUND:
+            if self.get_my_mothership().fuel >= 400 and self.get_my_mothership().rock >= 500:
+                turns.append(BuyTurn(ShipType.SUCKER_SHIP))
+                turns.append(BuyTurn(ShipType.DRILL_SHIP))
+        else:
+            if random.random() < END_GAME_MINERS_BUY_PROB:
+                if self.get_my_mothership().fuel >= 400 and self.get_my_mothership().rock >= 500:
+                    turns.append(BuyTurn(ShipType.SUCKER_SHIP))
+                    turns.append(BuyTurn(ShipType.DRILL_SHIP))
+            else:
+                if self.get_my_mothership().fuel >= 400 and self.get_my_mothership().rock >= 250:
+                    turns.append(BuyTurn(ShipType.BATTLE_SHIP))
 
         for ship in self.my_ships:
             turns += ship.make_turn()
@@ -61,10 +69,10 @@ class MothershipState(Enum):
 
 class FighterState(Enum):
     DEFENDING_MOTHERSHIP = -1
-
     AT_MOTHERSHIP = 0
     TRAVELING_TO = 1
     AT_DESTINATION = 2
+
 
 class MyShipType(Enum):
     MINER = 0
@@ -82,8 +90,9 @@ class MyShip:
     path = []
     path_back = []
 
-    FIGHTER_FUEL_PER_TRIP = 100
+    FIGHTER_FUEL_PER_TRIP = 400
     FIGHTER_RANGE = 500
+    FIGHTER_WANTED_FUEL = 400
     MOTHERSHIP_SAFE_RADIUS = 50
 
     MINER_FUEL_PER_TRIP = 50
@@ -153,6 +162,9 @@ class MyShip:
                 pass
 
             case FighterState.AT_MOTHERSHIP:
+                if self.ship.fuel < self.FIGHTER_WANTED_FUEL:
+                    turns.append(SiphonTurn(self.mothership.id, self.id, self.FIGHTER_WANTED_FUEL - self.ship.fuel))
+                    return turns
                 self.destination = self.fighter_find_destination()
                 turn, _ = self.calculate_path_to_dest(self.destination, self.FIGHTER_FUEL_PER_TRIP)
                 self.client.log("bbb", turn)
@@ -164,6 +176,11 @@ class MyShip:
                 if dist <= 25:
                     turns.append(MoveTurn(self.ship.id, self.ship.vector.scale(-1)))
                     self.state = FighterState.AT_DESTINATION
+                else:
+                    available_targets = self.fighter_find_targets()
+                    if len(available_targets) != 0:
+                        target = self.fighter_find_best_target(available_targets)
+                        turns.append(ShootTurn(self.ship.id, target.id))
 
             case FighterState.AT_DESTINATION:
                 available_targets = self.fighter_find_targets()
@@ -288,9 +305,10 @@ class MyShip:
         motherships : list[int] = [mother for mother in all_ships if mother.type == ShipType.MOTHER_SHIP]
         motherships.remove(self.mothership)
 
-        closest = self.find_closest(motherships, blacklist)
-        return closest
-    
+        # closest = self.find_closest(motherships, blacklist)
+        # return closest
+        self.client.log("MOTHERSHIPS", motherships)
+        return random.choice(motherships)
     
     def fighter_find_targets(self):
         all_ships = self.client.game_map.ships

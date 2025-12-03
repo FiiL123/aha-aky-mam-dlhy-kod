@@ -320,7 +320,7 @@ class LoadTurn:
 class SiphonTurn:
     source_id: int
     destination_id: int
-    amount: int
+    amount: float
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -328,7 +328,7 @@ class SiphonTurn:
             "data": {
                 "source_id": self.source_id,
                 "destination_id": self.destination_id,
-                "amount": self.amount,
+                "amount": int(self.amount),
             },
         }
 
